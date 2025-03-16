@@ -572,6 +572,7 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     self.gce_network_tier = FLAGS.gce_network_tier
     self.gce_nic_types = FLAGS.gce_nic_types
     self.max_local_disks = vm_spec.num_local_ssds
+    self.ip_address_ipv6 = None  # Store the IPv6 address
     if (
         self.machine_type
         and self.machine_type in gce_disk.FIXED_SSD_MACHINE_TYPES
@@ -692,6 +693,12 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
       no_address_arg = []
       if not self.assign_external_ip or idx > 0:
         no_address_arg = ['no-address']
+      
+      # Add IPv6 configuration if enabled
+      ipv6_args = []
+      if gcp_flags.GCP_USE_IPV6.value:
+        ipv6_args = ['stack-type=IPV4_IPV6', 'ipv6-network-tier=PREMIUM']
+
       cmd.additional_flags += [
           '--network-interface',
           ','.join(
@@ -702,6 +709,7 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
               ]
               + gce_nic_queue_count_arg
               + no_address_arg
+              + ipv6_args
           ),
       ]
 
@@ -1046,6 +1054,12 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     if 'accessConfigs' in network_interface:
       self.ip_address = network_interface['accessConfigs'][0]['natIP']
 
+    # Extract IPv6 address if available
+    if gcp_flags.GCP_USE_IPV6.value and 'ipv6AccessConfigs' in network_interface:
+      self.ip_address_ipv6 = network_interface['ipv6AccessConfigs'][0]['externalIpv6']
+    elif gcp_flags.GCP_USE_IPV6.value and 'ipv6Address' in network_interface:
+      self.ip_address_ipv6 = network_interface['ipv6Address']
+
     for network_interface in describe_response['networkInterfaces']:
       self.internal_ips.append(network_interface['networkIP'])
 
@@ -1060,6 +1074,7 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
         not self.id
         or not self.GetInternalIPs()
         or (self.assign_external_ip and not self.ip_address)
+        or (gcp_flags.GCP_USE_IPV6.value and not self.ip_address_ipv6)
     )
 
   @vm_util.Retry()
@@ -1250,6 +1265,8 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
       result['confidential_compute_type'] = (
           gcp_flags.GCE_CONFIDENTIAL_COMPUTE_TYPE.value
       )
+    if self.ip_address_ipv6:
+      result['ipv6_address'] = self.ip_address_ipv6
 
     for disk_ in self.disks:
       result.update(disk_.GetResourceMetadata())
