@@ -769,13 +769,15 @@ class GceNetworkResource(resource.BaseResource):
   """Object representing a GCE Network resource."""
 
   def __init__(
-      self, name: str, mode: str, project: str, mtu: int | None = None
+      self, name: str, mode: str, project: str, mtu: int | None = None,
+      enable_ipv6: bool = False
   ):
     super().__init__()
     self.name = name
     self.mode = mode
     self.project = project
     self.mtu = mtu
+    self.enable_ipv6 = enable_ipv6
 
   def _Create(self):
     """Creates the Network resource."""
@@ -834,6 +836,7 @@ class GceSubnetResource(resource.BaseResource):
     self.region = region
     self.addr_range = addr_range
     self.project = project
+    self.enable_ipv6 = enable_ipv6
 
   def UpdateProperties(self) -> None:
     """Updates the properties of the subnet resource."""
@@ -922,7 +925,10 @@ class GceNetwork(network.BaseNetwork):
     self.network_resources = []
     self.subnet_resources = []
     mode = 'custom' if gcp_flags.GCP_USE_IPV6.value else gcp_flags.GCE_NETWORK_TYPE.value
+    mode = 'custom' if gcp_flags.GCP_USE_IPV6.value else gcp_flags.GCE_NETWORK_TYPE.value
     self.subnet_resource = None
+    
+    # Create network resources
     
     # Create network resources
     if not self.is_existing_network or mode == 'legacy':
@@ -935,6 +941,10 @@ class GceNetwork(network.BaseNetwork):
                 self.mtu,
             )
         )
+    
+    # Create subnet resources for custom mode networks
+    subnet_region = util.GetRegionFromZone(network_spec.zone)
+    if (self.is_existing_network and mode != 'legacy') or mode == 'custom':
     
     # Create subnet resources for custom mode networks
     subnet_region = util.GetRegionFromZone(network_spec.zone)
@@ -954,7 +964,9 @@ class GceNetwork(network.BaseNetwork):
           subnet_region,
           self.cidr,
           self.project,
+          enable_ipv6=gcp_flags.GCP_USE_IPV6.value
       )
+    
     
     self.network_resource = GceNetworkResource(
         self.primary_subnet_name, 
